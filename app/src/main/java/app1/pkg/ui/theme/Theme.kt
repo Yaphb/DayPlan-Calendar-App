@@ -16,25 +16,31 @@ import app1.pkg.model.AppTheme
 private val DarkColorScheme = darkColorScheme(
     primary = Color.White,
     onPrimary = Color.Black,
-    secondary = Color.LightGray,
+    secondary = Color(0xFF636366),
+    onSecondary = Color.White,
     background = Color(0xFF1C1C1E),
     surface = Color(0xFF2C2C2E),
     onBackground = Color.White,
     onSurface = Color.White,
     surfaceVariant = Color(0xFF3A3A3C),
-    onSurfaceVariant = Color.LightGray
+    onSurfaceVariant = Color.LightGray,
+    error = Color(0xFFFF453A),
+    onError = Color.White
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = Color.Black,
     onPrimary = Color.White,
-    secondary = Color.DarkGray,
+    secondary = Color(0xFF8E8E93),
+    onSecondary = Color.White,
     background = Color.White,
     surface = Color(0xFFF2F2F7),
     onBackground = Color.Black,
     onSurface = Color.Black,
     surfaceVariant = Color(0xFFE5E5EA),
-    onSurfaceVariant = Color.DarkGray
+    onSurfaceVariant = Color.DarkGray,
+    error = Color(0xFFFF3B30),
+    onError = Color.White
 )
 
 @Composable
@@ -47,13 +53,15 @@ fun App1Theme(
         DarkColorScheme.copy(
             primary = if (theme == AppTheme.BLACK) Color.White else theme.primaryColor,
             onPrimary = if (theme == AppTheme.BLACK) Color.Black else Color.White,
-            secondary = theme.primaryColor.copy(alpha = 0.7f)
+            secondary = if (theme == AppTheme.BLACK) Color(0xFF636366) else theme.primaryColor.copy(alpha = 0.7f),
+            onSecondary = Color.White
         )
     } else {
         LightColorScheme.copy(
-            primary = theme.primaryColor,
+            primary = if (theme == AppTheme.BLACK) Color.Black else theme.primaryColor,
             onPrimary = Color.White,
-            secondary = theme.primaryColor.copy(alpha = 0.7f)
+            secondary = if (theme == AppTheme.BLACK) Color(0xFF8E8E93) else theme.primaryColor.copy(alpha = 0.7f),
+            onSecondary = Color.White
         )
     }
 

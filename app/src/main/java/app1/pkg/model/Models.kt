@@ -28,8 +28,8 @@ enum class AppTheme(val displayName: String, val primaryColor: Color) {
 }
 
 data class CalendarSettings(
-    val wallpaperUri: String? = "https://images.unsplash.com/photo-1557683311-eac922347aa1?q=80&w=2029&auto=format&fit=crop", // Solid dark gradient
-    val bannerUri: String? = "https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=2029&auto=format&fit=crop", // Solid purple gradient
+    val wallpaperUri: String? = "https://images.alphacoders.com/138/thumb-1920-1380138.jpg", // Solid dark gradient
+    val bannerUri: String? = "https://images.alphacoders.com/138/thumb-1920-1380138.jpg", // Solid purple gradient
     val theme: AppTheme = AppTheme.BLACK,
     val isDarkMode: Boolean = false,
     val fontFamily: String = "Serif",
@@ -37,3 +37,16 @@ data class CalendarSettings(
 ) {
     val themeColor: Color get() = theme.primaryColor
 }
+
+data class WeatherInfo(
+    val temperature: Double,
+    val description: String,
+    val weatherCode: Int,
+    val icon: String,
+    val date: LocalDate,
+    val humidity: Int? = null,
+    val windSpeed: Double? = null,
+    val rainSum: Double? = null,
+    val tempMax: Double? = null,
+    val tempMin: Double? = null
+)

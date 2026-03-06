@@ -5,9 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -16,18 +18,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.NavigateBefore
-import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -38,109 +39,95 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app1.pkg.R
-import app1.pkg.model.AppTheme
 import app1.pkg.model.CalendarEvent
 import app1.pkg.model.CalendarSettings
+import app1.pkg.model.WeatherInfo
+import app1.pkg.network.getWeatherDescriptionRes
 import app1.pkg.viewmodel.CalendarViewModel
 import coil.compose.AsyncImage
-import java.time.DayOfWeek
+import kotlinx.coroutines.delay
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
 import java.util.*
 import kotlin.math.ceil
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
+fun CalendarScreen(
+    viewModel: CalendarViewModel = viewModel()
+) {
     val selectedDate by viewModel.selectedDate
-    val settings by viewModel.settings
-    val dayEvents by viewModel.selectedDayEvents
     val datesWithEvents by viewModel.datesWithEvents
-    
-    var currentMonth by remember { mutableStateOf(YearMonth.from(selectedDate)) }
+    val dayEvents by viewModel.selectedDayEvents
+    val settings by viewModel.settings
+    val weatherData by viewModel.weatherData
+    val hourlyWeatherData by viewModel.hourlyWeatherData
+    val isLoadingWeather by viewModel.isLoadingWeather
+
+    var currentMonth by remember { mutableStateOf(YearMonth.now()) }
     var showAddEventDialog by remember { mutableStateOf(false) }
-    var showSettingsDialog by remember { mutableStateOf(false) }
     var editingEvent by remember { mutableStateOf<CalendarEvent?>(null) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showWeatherDialog by remember { mutableStateOf(false) }
+    var weatherDate by remember { mutableStateOf(LocalDate.now()) }
 
     val isDateInPast = remember(selectedDate) { selectedDate.isBefore(LocalDate.now()) }
-
-    // Pagination State
+    
+    // Pagination for events
     var currentPage by remember { mutableIntStateOf(0) }
-    val pageSize = 1
-
-    // Reset page when date changes
-    LaunchedEffect(selectedDate) {
-        currentPage = 0
+    val paginatedEvents = remember(dayEvents, currentPage) {
+        if (dayEvents.isEmpty()) emptyList()
+        else listOf(dayEvents[currentPage % dayEvents.size])
     }
 
-    // Ensure currentPage is valid if events are deleted
-    LaunchedEffect(dayEvents.size) {
+    LaunchedEffect(dayEvents) {
         if (currentPage >= dayEvents.size && dayEvents.isNotEmpty()) {
-            currentPage = dayEvents.size - 1
+            currentPage = 0
         }
     }
 
-    val paginatedEvents = remember(dayEvents, currentPage) {
-        val start = currentPage * pageSize
-        dayEvents.drop(start).take(pageSize)
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
-        // Base Background
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.background,
-                            MaterialTheme.colorScheme.surface
-                        )
-                    )
-                )
-        )
-
-        // Wallpaper layer
         if (settings.wallpaperUri != null) {
             AsyncImage(
                 model = settings.wallpaperUri,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = if (settings.isDarkMode) 0.3f else 0.5f
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.3f))
+                    .blur(10.dp)
             )
         }
 
         Scaffold(
-            modifier = Modifier.navigationBarsPadding(),
             containerColor = Color.Transparent,
             topBar = {
                 CenterAlignedTopAppBar(
-                    modifier = Modifier.statusBarsPadding(),
-                    title = { 
-                        val monthYearText = remember(currentMonth) {
-                            "${currentMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${currentMonth.year}"
-                        }
+                    title = {
                         Text(
-                            monthYearText,
+                            currentMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())),
                             style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onBackground
-                        ) 
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.Bold
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
-                            Icon(Icons.Default.ChevronLeft, contentDescription = stringResource(R.string.previous_month), tint = MaterialTheme.colorScheme.onBackground)
+                            Icon(Icons.Default.ChevronLeft, contentDescription = stringResource(R.string.previous_month))
                         }
                     },
                     actions = {
                         IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
-                            Icon(Icons.Default.ChevronRight, contentDescription = stringResource(R.string.next_month), tint = MaterialTheme.colorScheme.onBackground)
+                            Icon(Icons.Default.ChevronRight, contentDescription = stringResource(R.string.next_month))
                         }
                         IconButton(onClick = { showSettingsDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onBackground)
+                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -182,14 +169,18 @@ fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
                         }
 
                         Column(
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             CalendarGrid(
                                 currentMonth = currentMonth,
                                 selectedDate = selectedDate,
                                 datesWithEvents = datesWithEvents,
-                                onDateSelected = { viewModel.onDateSelected(it) }
+                                onDateSelected = { viewModel.onDateSelected(it) },
+                                onDateDoubleClicked = { 
+                                    weatherDate = it
+                                    showWeatherDialog = true
+                                    viewModel.fetchWeatherForDate(it)
+                                }
                             )
                             
                             Spacer(modifier = Modifier.height(16.dp))
@@ -231,16 +222,16 @@ fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
                                 }
                             } else {
                                 Column {
-                                    paginatedEvents.forEach { event ->
+                                    paginatedEvents.forEach { eventItem ->
                                         EventItem(
-                                            event = event,
+                                            event = eventItem,
+                                            weatherInfo = weatherData[eventItem.date],
                                             onEdit = { editingEvent = it },
-                                            onDelete = { viewModel.deleteEvent(it.id) }
+                                            onDelete = { viewModel.deleteEvent(eventItem.id) }
                                         )
                                         Spacer(modifier = Modifier.height(16.dp))
                                     }
 
-                                    // Color-block carousel for navigating plans
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(bottom = 120.dp), 
                                         verticalAlignment = Alignment.CenterVertically
@@ -291,37 +282,48 @@ fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
                 }
             }
         }
-    }
 
-    if (showAddEventDialog) {
-        EventDialog(
-            selectedDate = selectedDate,
-            onDismiss = { showAddEventDialog = false },
-            onConfirm = { title, color, time, description ->
-                viewModel.addEvent(title, selectedDate, color, time, description)
-                showAddEventDialog = false
-            }
-        )
-    }
+        if (showAddEventDialog) {
+            EventDialog(
+                selectedDate = selectedDate,
+                onDismiss = { showAddEventDialog = false },
+                onConfirm = { title, color, time, description ->
+                    viewModel.addEvent(title, selectedDate, color, time, description)
+                    showAddEventDialog = false
+                }
+            )
+        }
 
-    editingEvent?.let { eventToEdit ->
-        EventDialog(
-            event = eventToEdit,
-            selectedDate = eventToEdit.date,
-            onDismiss = { editingEvent = null },
-            onConfirm = { title, color, time, description ->
-                viewModel.updateEvent(eventToEdit.copy(title = title, color = color, time = time, description = description))
-                editingEvent = null
-            }
-        )
-    }
+        editingEvent?.let { eventToEdit ->
+            EventDialog(
+                event = eventToEdit,
+                selectedDate = eventToEdit.date,
+                onDismiss = { editingEvent = null },
+                onConfirm = { title, color, time, description ->
+                    viewModel.updateEvent(eventToEdit.copy(title = title, color = color, time = time, description = description))
+                    editingEvent = null
+                }
+            )
+        }
 
-    if (showSettingsDialog) {
-        SettingsDialog(
-            settings = settings,
-            onDismiss = { showSettingsDialog = false },
-            onUpdateSettings = { viewModel.updateSettings(it) }
-        )
+        if (showSettingsDialog) {
+            SettingsDialog(
+                settings = settings,
+                onDismiss = { showSettingsDialog = false },
+                onUpdateSettings = { viewModel.updateSettings(it) },
+                onResetSettings = { viewModel.resetSettings() }
+            )
+        }
+
+        if (showWeatherDialog) {
+            WeatherDialog(
+                weatherInfo = weatherData[weatherDate],
+                hourlyWeatherData = hourlyWeatherData,
+                weatherDate = weatherDate,
+                isLoading = isLoadingWeather,
+                onDismiss = { showWeatherDialog = false }
+            )
+        }
     }
 }
 
@@ -377,8 +379,7 @@ fun EventDialog(
         title = { 
             Text(
                 if (event == null) stringResource(R.string.new_plan) else if (isReadOnly) stringResource(R.string.view_plan) else stringResource(R.string.edit_plan), 
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.titleLarge
             ) 
         },
         text = {
@@ -389,133 +390,88 @@ fun EventDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
-                if (isDateInPast && event == null) {
-                    Text(
-                        stringResource(R.string.cannot_add_past),
-                        color = Color.Red,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                } else if (isReadOnly) {
-                    Text(
-                        stringResource(R.string.past_read_only),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
                 Text(
-                    dateDisplayString,
-                    style = MaterialTheme.typography.titleMedium,
+                    text = dateDisplayString,
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                
+
                 OutlinedTextField(
                     value = title,
-                    onValueChange = { title = it },
-                    label = { Text(stringResource(R.string.title_label)) },
+                    onValueChange = { if (!isReadOnly) title = it },
+                    label = { Text(stringResource(R.string.event_title)) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary
-                    ),
-                    enabled = !isReadOnly && !isDateInPast
+                    readOnly = isReadOnly,
+                    singleLine = true
                 )
 
-                Text(stringResource(R.string.time_designation), style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.time), style = MaterialTheme.typography.labelLarge)
                 FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf("All Day", "Half Day", "Specific").forEach { option ->
-                        val label = when(option) {
-                            "All Day" -> stringResource(R.string.all_day)
-                            "Half Day" -> stringResource(R.string.half_day)
-                            else -> stringResource(R.string.specific)
-                        }
                         FilterChip(
                             selected = timeOption == option,
-                            onClick = { timeOption = option },
-                            label = { Text(label) },
-                            enabled = !isReadOnly && !isDateInPast,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                            )
+                            onClick = { if (!isReadOnly) timeOption = option },
+                            label = { Text(option) },
+                            enabled = !isReadOnly
                         )
                     }
                 }
 
                 if (timeOption == "Specific") {
-                    OutlinedCard(
-                        onClick = { if (!isReadOnly && !isDateInPast) showTimePicker = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.dp, if (isTimeInPast) Color.Red else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)),
-                        enabled = !isReadOnly && !isDateInPast
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isReadOnly) { showTimePicker = true }
+                            .padding(vertical = 8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            val formattedTime = remember(selectedTime) {
-                                selectedTime.format(DateTimeFormatter.ofPattern("hh:mm a", Locale.getDefault()))
-                            }
+                        Icon(Icons.Default.AccessTime, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = selectedTime.format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        if (isTimeInPast) {
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                formattedTime,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
+                                "Past time selected",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall
                             )
                         }
                     }
-                    if (isTimeInPast && !isReadOnly) {
-                        Text(
-                            stringResource(R.string.selected_time_passed),
-                            color = Color.Red,
-                            style = MaterialTheme.typography.bodySmall
+                }
+
+                Text(stringResource(R.string.color), style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    colors.forEach { color ->
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .clickable(enabled = !isReadOnly) { selectedColor = color }
+                                .border(
+                                    width = if (selectedColor == color) 3.dp else 0.dp,
+                                    color = if (selectedColor == color) MaterialTheme.colorScheme.outline else Color.Transparent,
+                                    shape = CircleShape
+                                )
                         )
                     }
                 }
 
                 OutlinedTextField(
                     value = description,
-                    onValueChange = { description = it },
-                    label = { Text(stringResource(R.string.description_label)) },
+                    onValueChange = { if (!isReadOnly) description = it },
+                    label = { Text(stringResource(R.string.description)) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary
-                    ),
-                    minLines = 3,
-                    enabled = !isReadOnly && !isDateInPast
+                    readOnly = isReadOnly,
+                    minLines = 3
                 )
-
-                Text(stringResource(R.string.theme_color), style = MaterialTheme.typography.labelLarge)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    colors.forEach { color ->
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                                .clickable(enabled = !isReadOnly && !isDateInPast) { selectedColor = color }
-                                .then(
-                                    if (selectedColor == color) 
-                                        Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                                    else Modifier
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (selectedColor == color) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
-                            }
-                        }
-                    }
-                }
             }
         },
         confirmButton = {
@@ -523,34 +479,23 @@ fun EventDialog(
                 Button(
                     onClick = { 
                         val finalTime = when (timeOption) {
-                            "Specific" -> selectedTime.format(DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH))
-                            else -> timeOption
+                            "All Day" -> "All Day"
+                            "Half Day" -> "Half Day"
+                            else -> selectedTime.format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH))
                         }
                         onConfirm(title, selectedColor, finalTime, description) 
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
                     enabled = canConfirm
                 ) {
                     Text(stringResource(R.string.confirm))
                 }
-            } else {
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) {
-                    Text(stringResource(R.string.close))
-                }
             }
         },
         dismissButton = {
-            if (!isReadOnly) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel), color = MaterialTheme.colorScheme.onSurface)
-                }
+            TextButton(onClick = onDismiss) {
+                Text(if (isReadOnly) stringResource(R.string.close) else stringResource(R.string.cancel))
             }
-        },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp)
+        }
     )
 
     if (showTimePicker) {
@@ -558,74 +503,30 @@ fun EventDialog(
             initialHour = selectedTime.hour,
             initialMinute = selectedTime.minute
         )
-        var showKeyboard by remember { mutableStateOf(false) }
         
-        Dialog(
-            onDismissRequest = { showTimePicker = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
+        Dialog(onDismissRequest = { showTimePicker = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .width(IntrinsicSize.Min)
+                tonalElevation = 6.dp
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = if (showKeyboard) stringResource(R.string.enter_time) else stringResource(R.string.select_time),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    if (showKeyboard) {
-                        TimeInput(
-                            state = timePickerState,
-                            colors = TimePickerDefaults.colors(
-                                selectorColor = MaterialTheme.colorScheme.primary,
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    } else {
-                        TimePicker(
-                            state = timePickerState,
-                            colors = TimePickerDefaults.colors(
-                                clockDialColor = MaterialTheme.colorScheme.surfaceVariant,
-                                selectorColor = MaterialTheme.colorScheme.primary,
-                                containerColor = MaterialTheme.colorScheme.surface,
-                                periodSelectorSelectedContainerColor = MaterialTheme.colorScheme.primary,
-                                periodSelectorSelectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                                timeSelectorSelectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                timeSelectorSelectedContentColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                    }
-                    
+                    TimePicker(state = timePickerState)
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        IconButton(onClick = { showKeyboard = !showKeyboard }) {
-                            Icon(
-                                if (showKeyboard) Icons.Default.Schedule else Icons.Default.Keyboard,
-                                contentDescription = stringResource(R.string.toggle_input_mode),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
                         TextButton(onClick = { showTimePicker = false }) {
-                            Text(stringResource(R.string.cancel), color = MaterialTheme.colorScheme.primary)
+                            Text(stringResource(R.string.cancel))
                         }
                         TextButton(onClick = {
                             selectedTime = LocalTime.of(timePickerState.hour, timePickerState.minute)
                             showTimePicker = false
                         }) {
-                            Text(stringResource(R.string.ok), color = MaterialTheme.colorScheme.primary)
+                            Text(stringResource(R.string.confirm))
                         }
                     }
                 }
@@ -639,193 +540,230 @@ fun CalendarGrid(
     currentMonth: YearMonth,
     selectedDate: LocalDate,
     datesWithEvents: Set<LocalDate>,
-    onDateSelected: (LocalDate) -> Unit
+    onDateSelected: (LocalDate) -> Unit,
+    onDateDoubleClicked: (LocalDate) -> Unit
 ) {
-    val daysInMonth = remember(currentMonth) { currentMonth.lengthOfMonth() }
-    val firstDayOfMonth = remember(currentMonth) { currentMonth.atDay(1).dayOfWeek.value % 7 }
+    val daysInMonth = currentMonth.lengthOfMonth()
+    val firstDayOfMonth = currentMonth.atDay(1).dayOfWeek.value % 7 // 0 for Sunday
+    
+    val totalCells = ceil((daysInMonth + firstDayOfMonth) / 7.0).toInt() * 7
     
     Column {
         Row(modifier = Modifier.fillMaxWidth()) {
-            val dayLabels = remember { 
-                listOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY)
-                    .map { it.getDisplayName(TextStyle.NARROW, Locale.getDefault()) }
-            }
-            dayLabels.forEach { day ->
+            val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
+            weekdays.forEach { day ->
                 Text(
                     text = day,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
         
         Spacer(modifier = Modifier.height(8.dp))
         
-        var currentDay = 1
-        for (i in 0 until 6) {
+        for (i in 0 until totalCells step 7) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 for (j in 0 until 7) {
-                    val dayIndex = i * 7 + j
-                    if (dayIndex < firstDayOfMonth || currentDay > daysInMonth) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    } else {
-                        val date = currentMonth.atDay(currentDay)
+                    val dayIndex = i + j
+                    val dayOfMonth = dayIndex - firstDayOfMonth + 1
+                    
+                    if (dayOfMonth in 1..daysInMonth) {
+                        val date = currentMonth.atDay(dayOfMonth)
                         val isSelected = date == selectedDate
-                        val hasEvents = remember(date, datesWithEvents) { datesWithEvents.contains(date) }
+                        val isToday = date == LocalDate.now()
+                        val hasEvents = datesWithEvents.contains(date)
                         
-                        DayCell(
-                            dayNumber = currentDay,
-                            isSelected = isSelected,
-                            hasEvents = hasEvents,
-                            onClick = { onDateSelected(date) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        currentDay++
+                        var lastClickTime by remember { mutableLongStateOf(0L) }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isSelected -> MaterialTheme.colorScheme.primary
+                                        isToday -> MaterialTheme.colorScheme.primaryContainer
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .clickable {
+                                    val currentTime = System.currentTimeMillis()
+                                    if (currentTime - lastClickTime < 300) {
+                                        onDateDoubleClicked(date)
+                                    } else {
+                                        onDateSelected(date)
+                                    }
+                                    lastClickTime = currentTime
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = dayOfMonth.toString(),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = when {
+                                        isSelected -> MaterialTheme.colorScheme.onPrimary
+                                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (hasEvents) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.primary
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
-            if (currentDay > daysInMonth) break
         }
     }
 }
 
-@Composable
-fun DayCell(
-    dayNumber: Int,
-    isSelected: Boolean,
-    hasEvents: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .aspectRatio(1f)
-            .padding(2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = dayNumber.toString(),
-                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-            )
-            if (hasEvents) {
-                Box(
-                    modifier = Modifier
-                        .size(4.dp)
-                        .clip(CircleShape)
-                        .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
-                )
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EventItem(
     event: CalendarEvent,
+    weatherInfo: WeatherInfo?,
     onEdit: (CalendarEvent) -> Unit,
-    onDelete: (CalendarEvent) -> Unit
+    onDelete: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val isPastEvent = remember(event.date) { event.date.isBefore(LocalDate.now()) }
+    var showMenu by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+            .combinedClickable(
+                onClick = { onEdit(event) },
+                onLongClick = { showMenu = true }
+            ),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        border = BorderStroke(1.dp, event.color.copy(alpha = 0.3f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(event.color),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.White))
-                }
-                
-                Spacer(modifier = Modifier.width(12.dp))
-                
-                Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(event.color)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = event.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = event.time,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
-
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                
+                Text(
+                    text = event.time,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
-
-            if (event.description.isNotEmpty()) {
+            
+            if (event.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = event.description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (expanded) Int.MAX_VALUE else 1,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            AnimatedVisibility(visible = expanded) {
-                Column {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { onEdit(event) }) {
-                            Text(
-                                if (isPastEvent) stringResource(R.string.view_plan) else stringResource(R.string.edit_plan),
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                        if (!isPastEvent) {
-                            TextButton(onClick = { onDelete(event) }) {
-                                Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
+            if (weatherInfo != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    AsyncImage(
+                        model = "https://openweathermap.org/img/wn/${weatherInfo.icon}.png",
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "${weatherInfo.temperature}°C - ${stringResource(getWeatherDescriptionRes(weatherInfo.weatherCode))}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 }
             }
         }
     }
+
+    if (showMenu) {
+        AlertDialog(
+            onDismissRequest = { showMenu = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete()
+                    showMenu = false
+                }) {
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMenu = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            title = { Text(stringResource(R.string.delete_event_title)) },
+            text = { Text(stringResource(R.string.delete_event_confirm)) }
+        )
+    }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsDialog(
     settings: CalendarSettings,
     onDismiss: () -> Unit,
-    onUpdateSettings: (CalendarSettings) -> Unit
+    onUpdateSettings: (CalendarSettings) -> Unit,
+    onResetSettings: () -> Unit
 ) {
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onUpdateSettings(settings.copy(wallpaperUri = uri.toString()))
+        }
+    }
+
     val bannerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -834,124 +772,247 @@ fun SettingsDialog(
         }
     }
 
-    val wallpaperLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            onUpdateSettings(settings.copy(wallpaperUri = uri.toString()))
-        }
-    }
-
-    Dialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .wrapContentHeight(),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                Text(
-                    stringResource(R.string.settings_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.ExtraBold
-                )
-
+        title = { Text(stringResource(R.string.settings)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(stringResource(R.string.dark_mode), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.dark_mode))
                     Switch(
                         checked = settings.isDarkMode,
                         onCheckedChange = { onUpdateSettings(settings.copy(isDarkMode = it)) }
                     )
                 }
+                
+                Button(
+                    onClick = { launcher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(stringResource(R.string.change_wallpaper))
+                }
 
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.app_theme), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                Button(
+                    onClick = { bannerLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(stringResource(R.string.change_banner))
+                }
+
+                Button(
+                    onClick = { onResetSettings() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    )
+                ) {
+                    Text(stringResource(R.string.reset_visuals))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WeatherDialog(
+    weatherInfo: WeatherInfo?,
+    hourlyWeatherData: Map<String, WeatherInfo>,
+    weatherDate: LocalDate,
+    isLoading: Boolean,
+    onDismiss: () -> Unit
+) {
+    var selectedTime by remember { mutableStateOf(LocalTime.now()) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    
+    val displayWeather = remember(weatherDate, selectedTime, hourlyWeatherData, weatherInfo) {
+        val dateTimeKey = LocalDateTime.of(weatherDate, selectedTime.withMinute(0).withSecond(0)).toString().substring(0, 13) + ":00"
+        hourlyWeatherData.entries.find { it.key.startsWith(dateTimeKey.substring(0, 13)) }?.value ?: weatherInfo
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        content = {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .wrapContentHeight(),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = stringResource(R.string.weather_details),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    val timeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
+                    val isNight = selectedTime.hour >= 18 || selectedTime.hour < 6
+                    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .padding(bottom = 16.dp)
+                            .clickable { showTimePicker = true }
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        AppTheme.entries.forEach { theme ->
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(theme.primaryColor)
-                                    .clickable { onUpdateSettings(settings.copy(theme = theme)) }
-                                    .then(
-                                        if (settings.theme == theme) 
-                                            Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                                        else Modifier
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (settings.theme == theme) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
-                                }
-                            }
+                        Text(
+                            text = selectedTime.format(timeFormatter),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isNight) stringResource(R.string.night_time) else stringResource(R.string.day_time),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(stringResource(R.string.loading_weather))
+                    } else if (displayWeather != null) {
+                        AsyncImage(
+                            model = "https://openweathermap.org/img/wn/${displayWeather.icon}@2x.png",
+                            contentDescription = null,
+                            modifier = Modifier.size(80.dp)
+                        )
+                        Text(
+                            text = "${displayWeather.temperature}°C",
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = stringResource(getWeatherDescriptionRes(displayWeather.weatherCode)),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            WeatherDetailItem(
+                                icon = Icons.Default.WaterDrop,
+                                label = stringResource(R.string.humidity),
+                                value = if (displayWeather.humidity != null) "${displayWeather.humidity}%" else "--"
+                            )
+                            WeatherDetailItem(
+                                icon = Icons.Default.Air,
+                                label = stringResource(R.string.wind),
+                                value = if (displayWeather.windSpeed != null) "${displayWeather.windSpeed} m/s" else "--"
+                            )
                         }
+                    } else {
+                        Text(stringResource(R.string.weather_not_available))
                     }
-                }
-
-                HorizontalDivider(modifier = Modifier.alpha(0.1f))
-
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = { bannerLauncher.launch("image/*") },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ) {
-                        Text(stringResource(R.string.change_banner), fontWeight = FontWeight.Bold)
-                    }
-
-                    Button(
-                        onClick = { wallpaperLauncher.launch("image/*") },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ) {
-                        Text(stringResource(R.string.change_wallpaper), fontWeight = FontWeight.Bold)
-                    }
-
-                    Button(
-                        onClick = { 
-                            onUpdateSettings(settings.copy(
-                                bannerUri = "https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=2029&auto=format&fit=crop",
-                                wallpaperUri = "https://images.unsplash.com/photo-1557683311-eac922347aa1?q=80&w=2029&auto=format&fit=crop"
-                            )) 
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), contentColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text(stringResource(R.string.reset_visuals), fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
                     Button(
                         onClick = onDismiss,
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.width(100.dp).height(44.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Black, contentColor = Color.White)
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.onSurface,
+                            contentColor = MaterialTheme.colorScheme.surface
+                        ),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(stringResource(R.string.close), fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.close))
                     }
                 }
             }
         }
+    )
+
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = selectedTime.hour,
+            initialMinute = selectedTime.minute
+        )
+        
+        Dialog(onDismissRequest = { showTimePicker = false }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(stringResource(R.string.select_weather_time), style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TimePicker(state = timePickerState)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showTimePicker = false }) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                        TextButton(onClick = {
+                            selectedTime = LocalTime.of(timePickerState.hour, 0) // Hourly resolution
+                            showTimePicker = false
+                        }) {
+                            Text(stringResource(R.string.confirm))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WeatherDetailItem(icon: ImageVector, label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
