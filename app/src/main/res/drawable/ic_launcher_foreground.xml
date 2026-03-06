@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Calendar Body -->
+    <path
+        android:pathData="M30,35 L78,35 C81,35 83,38 83,41 L83,78 C83,81 81,83 78,83 L30,83 C27,83 25,81 25,78 L25,41 C25,38 27,35 30,35 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Header Bar -->
+    <path
+        android:pathData="M30,35 L78,35 C81,35 83,38 83,41 L83,48 L25,48 L25,41 C25,38 27,35 30,35 Z"
+        android:fillColor="#FF5252"/>
+
+    <!-- Calendar Rings -->
+    <path
+        android:pathData="M38,28 L38,40 M70,28 L70,40"
+        android:strokeWidth="4"
+        android:strokeColor="#424242"
+        android:strokeLineCap="round"/>
+
+    <!-- Day Grid Representation -->
+    <path
+        android:pathData="M35,58 L45,58 M54,58 L64,58 M73,58 L75,58
+                          M35,68 L45,68 M54,68 L64,68 M73,68 L75,68"
+        android:strokeWidth="3"
+        android:strokeColor="#EEEEEE"
+        android:strokeLineCap="round"/>
+
+    <!-- Highlighted Day Dot -->
+    <path
+        android:pathData="M54,68 C54,66.3 55.3,65 57,65 C58.7,65 60,66.3 60,68 C60,69.7 58.7,71 57,71 C55.3,71 54,69.7 54,68 Z"
+        android:fillColor="#FF5252"/>
+
+</vector>
