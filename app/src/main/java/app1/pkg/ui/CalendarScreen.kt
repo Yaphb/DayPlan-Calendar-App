@@ -11,13 +11,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -45,490 +47,587 @@ import app1.pkg.model.WeatherInfo
 import app1.pkg.network.getWeatherDescriptionRes
 import app1.pkg.viewmodel.CalendarViewModel
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.util.*
+import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 import kotlin.math.ceil
+
+enum class CalendarViewMode { MONTH, WEEK, DAY }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarScreen(
-    viewModel: CalendarViewModel = viewModel()
-) {
+fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
+    val events by viewModel.events
     val selectedDate by viewModel.selectedDate
-    val datesWithEvents by viewModel.datesWithEvents
-    val dayEvents by viewModel.selectedDayEvents
-    val settings by viewModel.settings
     val weatherData by viewModel.weatherData
     val hourlyWeatherData by viewModel.hourlyWeatherData
     val isLoadingWeather by viewModel.isLoadingWeather
+    val settings by viewModel.settings
+    val datesWithEvents by viewModel.datesWithEvents
+    
+    var currentMonth by remember { mutableStateOf(YearMonth.from(selectedDate)) }
+    var viewMode by remember { mutableStateOf(CalendarViewMode.MONTH) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
-    var currentMonth by remember { mutableStateOf(YearMonth.now()) }
-    var showAddEventDialog by remember { mutableStateOf(false) }
-    var editingEvent by remember { mutableStateOf<CalendarEvent?>(null) }
+    var showEventDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showWeatherDialog by remember { mutableStateOf(false) }
+    var editingEvent by remember { mutableStateOf<CalendarEvent?>(null) }
     var weatherDate by remember { mutableStateOf(LocalDate.now()) }
 
-    val isDateInPast = remember(selectedDate) { selectedDate.isBefore(LocalDate.now()) }
-    
-    // Pagination for events
-    var currentPage by remember { mutableIntStateOf(0) }
-    val paginatedEvents = remember(dayEvents, currentPage) {
-        if (dayEvents.isEmpty()) emptyList()
-        else listOf(dayEvents[currentPage % dayEvents.size])
-    }
+    // Dynamic color values based on whether a wallpaper is active
+    val hasWallpaper = settings.wallpaperUri != null
+    val onBgColor = if (hasWallpaper) Color.White else MaterialTheme.colorScheme.onBackground
+    val secondaryOnBgColor = if (hasWallpaper) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val surfaceContainerColor = if (hasWallpaper) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
+    val surfaceBorderColor = if (hasWallpaper) Color.White.copy(alpha = 0.15f) else MaterialTheme.colorScheme.outlineVariant
 
-    LaunchedEffect(dayEvents) {
-        if (currentPage >= dayEvents.size && dayEvents.isNotEmpty()) {
-            currentPage = 0
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (settings.wallpaperUri != null) {
-            AsyncImage(
-                model = settings.wallpaperUri,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f))
-                    .blur(10.dp)
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            SidebarContent(
+                onClose = { scope.launch { drawerState.close() } },
+                onAddEvent = {
+                    editingEvent = null
+                    showEventDialog = true
+                    scope.launch { drawerState.close() }
+                },
+                onOpenSettings = {
+                    showSettingsDialog = true
+                    scope.launch { drawerState.close() }
+                }
             )
         }
-
-        Scaffold(
-            containerColor = Color.Transparent,
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Text(
-                            currentMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
-                            Icon(Icons.Default.ChevronLeft, contentDescription = stringResource(R.string.previous_month))
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
-                            Icon(Icons.Default.ChevronRight, contentDescription = stringResource(R.string.next_month))
-                        }
-                        IconButton(onClick = { showSettingsDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    )
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Wallpaper Background
+            if (hasWallpaper) {
+                AsyncImage(
+                    model = settings.wallpaperUri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .blur(20.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
                 )
             }
-        ) { innerPadding ->
-            Surface(
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 16.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = if (settings.wallpaperUri != null) 
-                    MaterialTheme.colorScheme.surface.copy(alpha = 0.7f) 
-                    else MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)),
-                tonalElevation = 4.dp
-            ) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
+
+            Scaffold(
+                containerColor = Color.Transparent,
+                topBar = {
+                    TopBar(
+                        onMenuClick = { scope.launch { drawerState.open() } },
+                        onViewModeChange = { viewMode = it },
+                        viewMode = viewMode,
+                        onBgColor = onBgColor
+                    )
+                }
+            ) { innerPadding ->
+                Column(
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .fillMaxSize()
+                ) {
+                    // Main Calendar Card
+                    Surface(
+                        shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                        color = surfaceContainerColor,
+                        border = BorderStroke(1.dp, surfaceBorderColor),
+                        tonalElevation = 4.dp,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (settings.bannerUri != null) {
-                            AsyncImage(
-                                model = settings.bannerUri,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(100.dp)
-                                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
-                                contentScale = ContentScale.Crop,
-                                alpha = 0.8f
-                            )
-                        }
-
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            CalendarGrid(
-                                currentMonth = currentMonth,
-                                selectedDate = selectedDate,
-                                datesWithEvents = datesWithEvents,
-                                onDateSelected = { viewModel.onDateSelected(it) },
-                                onDateDoubleClicked = { 
-                                    weatherDate = it
-                                    showWeatherDialog = true
-                                    viewModel.fetchWeatherForDate(it)
-                                }
-                            )
-                            
-                            Spacer(modifier = Modifier.height(16.dp))
-                            
-                            Text(
-                                stringResource(R.string.today_plan),
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
-                            if (dayEvents.isEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(200.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            stringResource(R.string.no_tasks),
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        if (!isDateInPast) {
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                            FloatingActionButton(
-                                                onClick = { showAddEventDialog = true },
-                                                containerColor = MaterialTheme.colorScheme.primary,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                                shape = RoundedCornerShape(16.dp)
-                                            ) {
-                                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_event))
-                                            }
-                                        }
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            // Navigation Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
+                                        Icon(Icons.Default.ChevronLeft, contentDescription = "Prev", tint = onBgColor)
+                                    }
+                                    Text(
+                                        text = currentMonth.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault())),
+                                        color = onBgColor,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                    IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
+                                        Icon(Icons.Default.ChevronRight, contentDescription = "Next", tint = onBgColor)
                                     }
                                 }
-                            } else {
-                                Column {
-                                    paginatedEvents.forEach { eventItem ->
-                                        EventItem(
-                                            event = eventItem,
-                                            weatherInfo = weatherData[eventItem.date],
-                                            onEdit = { editingEvent = it },
-                                            onDelete = { viewModel.deleteEvent(eventItem.id) }
-                                        )
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                    }
+                                
+                                TextButton(onClick = {
+                                    val today = LocalDate.now()
+                                    viewModel.selectDate(today)
+                                    currentMonth = YearMonth.from(today)
+                                }) {
+                                    Text("Today", color = onBgColor, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 120.dp), 
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        if (dayEvents.size > 1) {
-                                            LazyRow(
-                                                modifier = Modifier.weight(1f),
-                                                horizontalArrangement = Arrangement.Center,
-                                                contentPadding = PaddingValues(horizontal = 8.dp)
-                                            ) {
-                                                itemsIndexed(dayEvents) { index, event ->
-                                                    val isSelected = index == currentPage
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .padding(horizontal = 4.dp)
-                                                            .size(width = 32.dp, height = 12.dp)
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(if (isSelected) event.color else event.color.copy(alpha = 0.3f))
-                                                            .clickable { currentPage = index }
-                                                            .border(
-                                                                width = if (isSelected) 1.dp else 0.dp,
-                                                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                                                shape = RoundedCornerShape(6.dp)
-                                                            )
-                                                    )
-                                                }
-                                            }
-                                        } else {
-                                            Spacer(modifier = Modifier.weight(1f))
-                                        }
-
-                                        if (!isDateInPast) {
-                                            FloatingActionButton(
-                                                onClick = { showAddEventDialog = true },
-                                                containerColor = MaterialTheme.colorScheme.primary,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                                shape = RoundedCornerShape(16.dp),
-                                                modifier = Modifier.size(48.dp)
-                                            ) {
-                                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_event), modifier = Modifier.size(24.dp))
-                                            }
-                                        }
-                                    }
+                            Box(modifier = Modifier.fillMaxWidth().animateContentSize()) {
+                                when (viewMode) {
+                                    CalendarViewMode.MONTH -> MonthGrid(
+                                        currentMonth = currentMonth,
+                                        selectedDate = selectedDate,
+                                        datesWithEvents = datesWithEvents,
+                                        onDateSelected = { viewModel.selectDate(it) },
+                                        onDateDoubleClicked = {
+                                            weatherDate = it
+                                            showWeatherDialog = true
+                                            viewModel.fetchWeatherForDate(it)
+                                        },
+                                        onBgColor = onBgColor
+                                    )
+                                    CalendarViewMode.WEEK -> WeekStrip(
+                                        selectedDate = selectedDate,
+                                        onDateSelected = { viewModel.selectDate(it) },
+                                        onBgColor = onBgColor
+                                    )
+                                    CalendarViewMode.DAY -> DayHeader(selectedDate = selectedDate, onBgColor = onBgColor)
                                 }
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Events List / Timeline
+                    Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                        when (viewMode) {
+                            CalendarViewMode.MONTH -> EventListSection(
+                                selectedDate = selectedDate,
+                                events = events,
+                                weatherData = weatherData,
+                                onDeleteEvent = { viewModel.deleteEvent(it) },
+                                onEditEvent = {
+                                    editingEvent = it
+                                    showEventDialog = true
+                                },
+                                onToggleNotification = { viewModel.toggleNotification(it) },
+                                onBgColor = onBgColor,
+                                secondaryOnBgColor = secondaryOnBgColor
+                            )
+                            CalendarViewMode.WEEK, CalendarViewMode.DAY -> TimelineView(
+                                selectedDate = selectedDate,
+                                events = events,
+                                onEventClick = {
+                                    editingEvent = it
+                                    showEventDialog = true
+                                },
+                                onBgColor = onBgColor
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.navigationBarsPadding())
                 }
             }
         }
+    }
 
-        if (showAddEventDialog) {
-            EventDialog(
-                selectedDate = selectedDate,
-                onDismiss = { showAddEventDialog = false },
-                onConfirm = { title, color, time, description ->
-                    viewModel.addEvent(title, selectedDate, color, time, description)
-                    showAddEventDialog = false
+    if (showEventDialog) {
+        EventDialog(
+            event = editingEvent,
+            onDismiss = { showEventDialog = false },
+            onSave = { title, time, description, isNotificationEnabled ->
+                if (editingEvent != null) {
+                    viewModel.updateEvent(editingEvent!!.copy(
+                        title = title, 
+                        time = time, 
+                        description = description,
+                        isNotificationEnabled = isNotificationEnabled
+                    ))
+                } else {
+                    viewModel.addEvent(title, selectedDate, time, description, isNotificationEnabled = isNotificationEnabled)
                 }
-            )
-        }
+                showEventDialog = false
+            }
+        )
+    }
 
-        editingEvent?.let { eventToEdit ->
-            EventDialog(
-                event = eventToEdit,
-                selectedDate = eventToEdit.date,
-                onDismiss = { editingEvent = null },
-                onConfirm = { title, color, time, description ->
-                    viewModel.updateEvent(eventToEdit.copy(title = title, color = color, time = time, description = description))
-                    editingEvent = null
+    if (showSettingsDialog) {
+        SettingsDialog(
+            settings = settings,
+            onDismiss = { showSettingsDialog = false },
+            onUpdateSettings = { viewModel.updateSettings(it) },
+            onResetSettings = { viewModel.resetSettings() }
+        )
+    }
+
+    if (showWeatherDialog) {
+        WeatherDialog(
+            weatherInfo = weatherData[weatherDate],
+            hourlyWeatherData = hourlyWeatherData,
+            weatherDate = weatherDate,
+            isLoading = isLoadingWeather,
+            onDismiss = { showWeatherDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TopBar(
+    onMenuClick: () -> Unit,
+    onViewModeChange: (CalendarViewMode) -> Unit,
+    viewMode: CalendarViewMode,
+    onBgColor: Color
+) {
+    TopAppBar(
+        title = {
+            Text(
+                text = "DayPlan",
+                style = MaterialTheme.typography.titleLarge,
+                color = onBgColor,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Visible
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = onMenuClick) {
+                Icon(Icons.Default.Menu, contentDescription = "Sidebar", tint = onBgColor)
+            }
+        },
+        actions = {
+            ViewModeSwitcher(
+                currentMode = viewMode,
+                onModeChange = onViewModeChange,
+                modifier = Modifier.width(210.dp), // Reverted to previous scale
+                onBgColor = onBgColor
+            )
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = Color.Transparent
+        )
+    )
+}
+
+@Composable
+fun ViewModeSwitcher(
+    currentMode: CalendarViewMode,
+    onModeChange: (CalendarViewMode) -> Unit,
+    modifier: Modifier = Modifier,
+    onBgColor: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = onBgColor.copy(alpha = 0.15f),
+        modifier = modifier.padding(end = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf(CalendarViewMode.MONTH, CalendarViewMode.WEEK, CalendarViewMode.DAY).forEach { mode ->
+                val isSelected = currentMode == mode
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isSelected) onBgColor else Color.Transparent,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onModeChange(mode) }
+                ) {
+                    Text(
+                        text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isSelected) {
+                            if (onBgColor == Color.White) Color.Black else MaterialTheme.colorScheme.onPrimary
+                        } else onBgColor,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
                 }
-            )
-        }
-
-        if (showSettingsDialog) {
-            SettingsDialog(
-                settings = settings,
-                onDismiss = { showSettingsDialog = false },
-                onUpdateSettings = { viewModel.updateSettings(it) },
-                onResetSettings = { viewModel.resetSettings() }
-            )
-        }
-
-        if (showWeatherDialog) {
-            WeatherDialog(
-                weatherInfo = weatherData[weatherDate],
-                hourlyWeatherData = hourlyWeatherData,
-                weatherDate = weatherDate,
-                isLoading = isLoadingWeather,
-                onDismiss = { showWeatherDialog = false }
-            )
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun EventDialog(
-    event: CalendarEvent? = null,
-    selectedDate: LocalDate,
-    onDismiss: () -> Unit,
-    onConfirm: (String, Color, String, String) -> Unit
+fun SidebarContent(
+    onClose: () -> Unit,
+    onAddEvent: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    var title by remember { mutableStateOf(event?.title ?: "") }
-    var timeOption by remember { mutableStateOf(
-        when (event?.time) {
-            "All Day" -> "All Day"
-            "Half Day" -> "Half Day"
-            null -> "All Day"
-            else -> "Specific"
-        }
-    ) }
-    
-    val initialTime = remember(event, timeOption) {
-        if (timeOption == "Specific") {
-            try {
-                LocalTime.parse(event?.time, DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH))
-            } catch (_: Exception) {
-                LocalTime.now()
+    Surface(
+        modifier = Modifier.fillMaxHeight().width(280.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.MenuOpen, contentDescription = "Close")
+                }
             }
-        } else {
-            LocalTime.now()
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            Text("DayPlan", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            SidebarItem(icon = Icons.Default.CalendarToday, label = "My Plans", isSelected = true, onClick = onClose)
+            SidebarItem(icon = Icons.Default.Add, label = "Add New Event", onClick = onAddEvent)
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            SidebarItem(icon = Icons.Default.Settings, label = "Settings", onClick = onOpenSettings)
         }
     }
-    
-    var selectedTime by remember { mutableStateOf(initialTime) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    var description by remember { mutableStateOf(event?.description ?: "") }
-    
-    val colors = remember { listOf(Color(0xFF000000), Color(0xFF5856D6), Color(0xFFFF9500), Color(0xFFFF3B30), Color(0xFF34C759)) }
-    var selectedColor by remember { mutableStateOf(event?.color ?: colors[0]) }
+}
 
-    val isDateInPast = remember(selectedDate) { selectedDate.isBefore(LocalDate.now()) }
-    val isToday = remember(selectedDate) { selectedDate.isEqual(LocalDate.now()) }
-    
-    val isTimeInPast = if (isToday && timeOption == "Specific") {
-        selectedTime.isBefore(LocalTime.now().plusMinutes(1))
-    } else false
+@Composable
+fun SidebarItem(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(label, color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
 
-    val isReadOnly = isDateInPast && event != null
-    val canConfirm = title.isNotBlank() && !isDateInPast && !isTimeInPast
+@Composable
+fun MonthGrid(
+    currentMonth: YearMonth,
+    selectedDate: LocalDate,
+    datesWithEvents: Set<LocalDate>,
+    onDateSelected: (LocalDate) -> Unit,
+    onDateDoubleClicked: (LocalDate) -> Unit,
+    onBgColor: Color
+) {
+    CalendarGrid(
+        currentMonth = currentMonth,
+        selectedDate = selectedDate,
+        datesWithEvents = datesWithEvents,
+        onDateSelected = onDateSelected,
+        onDateDoubleClicked = onDateDoubleClicked,
+        onBgColor = onBgColor
+    )
+}
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { 
-            Text(
-                if (event == null) stringResource(R.string.new_plan) else if (isReadOnly) stringResource(R.string.view_plan) else stringResource(R.string.edit_plan), 
-                style = MaterialTheme.typography.titleLarge
-            ) 
-        },
-        text = {
-            val dateDisplayString = remember(selectedDate) {
-                selectedDate.format(DateTimeFormatter.ofPattern("d MMMM", Locale.getDefault()))
-            }
+@Composable
+fun WeekStrip(
+    selectedDate: LocalDate,
+    onDateSelected: (LocalDate) -> Unit,
+    onBgColor: Color
+) {
+    val startOfWeek = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val weekDates = (0..6).map { startOfWeek.plusDays(it.toLong()) }
+
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        weekDates.forEach { date ->
+            val isSelected = date == selectedDate
             Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState())
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .clickable { onDateSelected(date) }
+                    .padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = dateDisplayString,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
+                    date.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else onBgColor.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.labelSmall
                 )
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { if (!isReadOnly) title = it },
-                    label = { Text(stringResource(R.string.event_title)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    readOnly = isReadOnly,
-                    singleLine = true
+                Text(
+                    date.dayOfMonth.toString(),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else onBgColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
                 )
-
-                Text(stringResource(R.string.time), style = MaterialTheme.typography.labelLarge)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("All Day", "Half Day", "Specific").forEach { option ->
-                        FilterChip(
-                            selected = timeOption == option,
-                            onClick = { if (!isReadOnly) timeOption = option },
-                            label = { Text(option) },
-                            enabled = !isReadOnly
-                        )
-                    }
-                }
-
-                if (timeOption == "Specific") {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !isReadOnly) { showTimePicker = true }
-                            .padding(vertical = 8.dp)
-                    ) {
-                        Icon(Icons.Default.AccessTime, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = selectedTime.format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        if (isTimeInPast) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Past time selected",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
-                }
-
-                Text(stringResource(R.string.color), style = MaterialTheme.typography.labelLarge)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    colors.forEach { color ->
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                                .clickable(enabled = !isReadOnly) { selectedColor = color }
-                                .border(
-                                    width = if (selectedColor == color) 3.dp else 0.dp,
-                                    color = if (selectedColor == color) MaterialTheme.colorScheme.outline else Color.Transparent,
-                                    shape = CircleShape
-                                )
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { if (!isReadOnly) description = it },
-                    label = { Text(stringResource(R.string.description)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    readOnly = isReadOnly,
-                    minLines = 3
-                )
-            }
-        },
-        confirmButton = {
-            if (!isReadOnly) {
-                Button(
-                    onClick = { 
-                        val finalTime = when (timeOption) {
-                            "All Day" -> "All Day"
-                            "Half Day" -> "Half Day"
-                            else -> selectedTime.format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH))
-                        }
-                        onConfirm(title, selectedColor, finalTime, description) 
-                    },
-                    enabled = canConfirm
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(if (isReadOnly) stringResource(R.string.close) else stringResource(R.string.cancel))
             }
         }
-    )
+    }
+}
 
-    if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(
-            initialHour = selectedTime.hour,
-            initialMinute = selectedTime.minute
-        )
-        
-        Dialog(onDismissRequest = { showTimePicker = false }) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+@Composable
+fun DayHeader(selectedDate: LocalDate, onBgColor: Color) {
+    Text(
+        text = selectedDate.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+        color = onBgColor,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.fillMaxWidth(),
+        textAlign = TextAlign.Center
+    )
+}
+
+@Composable
+fun TimelineView(
+    selectedDate: LocalDate,
+    events: List<CalendarEvent>,
+    onEventClick: (CalendarEvent) -> Unit,
+    onBgColor: Color
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        val hours = (0..23)
+        items(hours.toList()) { hour ->
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                Text(
+                    text = String.format(Locale.getDefault(), "%02d:00", hour),
+                    color = onBgColor.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(45.dp).padding(top = 12.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 8.dp)
+                        .drawBehindGrid(onBgColor)
+                        .padding(8.dp)
                 ) {
-                    TimePicker(state = timePickerState)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { showTimePicker = false }) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(onClick = {
-                            selectedTime = LocalTime.of(timePickerState.hour, timePickerState.minute)
-                            showTimePicker = false
-                        }) {
-                            Text(stringResource(R.string.confirm))
-                        }
+                    val hourlyEvents = events.filter { 
+                        it.date == selectedDate && parseEventTime(it.time)?.hour == hour
                     }
+                    if (hourlyEvents.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            hourlyEvents.forEach { event ->
+                                CompactEventItem(event, onEventClick)
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(40.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun parseEventTime(timeStr: String): LocalTime? {
+    return try {
+        if (timeStr == "All Day" || timeStr == "Half Day") null
+        else LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH))
+    } catch (e: Exception) {
+        null
+    }
+}
+
+@Composable
+fun CompactEventItem(event: CalendarEvent, onClick: (CalendarEvent) -> Unit) {
+    Surface(
+        color = event.color.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, event.color.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onClick(event) }
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(event.color))
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(event.time, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+fun Modifier.drawBehindGrid(onBgColor: Color) = this.then(
+    Modifier.background(
+        color = onBgColor.copy(alpha = 0.05f),
+        shape = RoundedCornerShape(8.dp)
+    ).border(
+        width = 0.5.dp,
+        color = onBgColor.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(8.dp)
+    )
+)
+
+@Composable
+fun EventListSection(
+    selectedDate: LocalDate,
+    events: List<CalendarEvent>,
+    weatherData: Map<LocalDate, WeatherInfo>,
+    onDeleteEvent: (CalendarEvent) -> Unit,
+    onEditEvent: (CalendarEvent) -> Unit,
+    onToggleNotification: (CalendarEvent) -> Unit,
+    onBgColor: Color,
+    secondaryOnBgColor: Color
+) {
+    Column {
+        Text(
+            text = stringResource(R.string.events),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = onBgColor
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val dailyEvents = events.filter { it.date == selectedDate }
+        
+        if (dailyEvents.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = stringResource(R.string.no_events),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = secondaryOnBgColor
+                )
+            }
+        } else {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                dailyEvents.forEach { event ->
+                    EventItem(
+                        event = event,
+                        weatherInfo = weatherData[event.date],
+                        onDelete = { onDeleteEvent(event) },
+                        onClick = { onEditEvent(event) },
+                        onToggleNotification = { onToggleNotification(event) },
+                        onBgColor = onBgColor,
+                        secondaryOnBgColor = secondaryOnBgColor
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         }
@@ -541,7 +640,8 @@ fun CalendarGrid(
     selectedDate: LocalDate,
     datesWithEvents: Set<LocalDate>,
     onDateSelected: (LocalDate) -> Unit,
-    onDateDoubleClicked: (LocalDate) -> Unit
+    onDateDoubleClicked: (LocalDate) -> Unit,
+    onBgColor: Color
 ) {
     val daysInMonth = currentMonth.lengthOfMonth()
     val firstDayOfMonth = currentMonth.atDay(1).dayOfWeek.value % 7 // 0 for Sunday
@@ -556,8 +656,8 @@ fun CalendarGrid(
                     text = day,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = onBgColor.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -588,7 +688,7 @@ fun CalendarGrid(
                                 .background(
                                     when {
                                         isSelected -> MaterialTheme.colorScheme.primary
-                                        isToday -> MaterialTheme.colorScheme.primaryContainer
+                                        isToday -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                                         else -> Color.Transparent
                                     }
                                 )
@@ -609,10 +709,11 @@ fun CalendarGrid(
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = when {
                                         isSelected -> MaterialTheme.colorScheme.onPrimary
-                                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
-                                        else -> MaterialTheme.colorScheme.onSurface
+                                        isToday -> MaterialTheme.colorScheme.primary
+                                        else -> onBgColor
                                     },
-                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal
+                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 14.sp
                                 )
                                 if (hasEvents) {
                                     Box(
@@ -641,8 +742,11 @@ fun CalendarGrid(
 fun EventItem(
     event: CalendarEvent,
     weatherInfo: WeatherInfo?,
-    onEdit: (CalendarEvent) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onClick: () -> Unit,
+    onToggleNotification: () -> Unit,
+    onBgColor: Color,
+    secondaryOnBgColor: Color
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -650,50 +754,61 @@ fun EventItem(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = { onEdit(event) },
+                onClick = onClick,
                 onLongClick = { showMenu = true }
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = onBgColor.copy(alpha = 0.1f)
         ),
-        border = BorderStroke(1.dp, event.color.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, onBgColor.copy(alpha = 0.15f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .clip(CircleShape)
-                            .background(event.color)
-                    )
+                    Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(event.color))
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = event.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = onBgColor
                     )
                 }
                 
-                Text(
-                    text = event.time,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = event.time,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = secondaryOnBgColor
+                    )
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    IconButton(
+                        onClick = onToggleNotification,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (event.isNotificationEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                            contentDescription = "Toggle Notification",
+                            tint = if (event.isNotificationEnabled) MaterialTheme.colorScheme.primary else secondaryOnBgColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
             
-            if (event.description.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
+            if (event.description.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = event.description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = secondaryOnBgColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -706,7 +821,7 @@ fun EventItem(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                            onBgColor.copy(alpha = 0.05f),
                             RoundedCornerShape(8.dp)
                         )
                         .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -720,7 +835,7 @@ fun EventItem(
                     Text(
                         text = "${weatherInfo.temperature}°C - ${stringResource(getWeatherDescriptionRes(weatherInfo.weatherCode))}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = secondaryOnBgColor
                     )
                 }
             }
@@ -764,14 +879,6 @@ fun SettingsDialog(
         }
     }
 
-    val bannerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            onUpdateSettings(settings.copy(bannerUri = uri.toString()))
-        }
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings)) },
@@ -798,17 +905,6 @@ fun SettingsDialog(
                     )
                 ) {
                     Text(stringResource(R.string.change_wallpaper))
-                }
-
-                Button(
-                    onClick = { bannerLauncher.launch("image/*") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(stringResource(R.string.change_banner))
                 }
 
                 Button(
@@ -848,7 +944,7 @@ fun WeatherDialog(
         hourlyWeatherData.entries.find { it.key.startsWith(dateTimeKey.substring(0, 13)) }?.value ?: weatherInfo
     }
 
-    AlertDialog(
+    BasicAlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
         content = {
@@ -983,7 +1079,8 @@ fun WeatherDialog(
                             Text(stringResource(R.string.cancel))
                         }
                         TextButton(onClick = {
-                            selectedTime = LocalTime.of(timePickerState.hour, 0) // Hourly resolution
+                            val selectedLocalTime = LocalTime.of(timePickerState.hour, 0)
+                            selectedTime = selectedLocalTime
                             showTimePicker = false
                         }) {
                             Text(stringResource(R.string.confirm))
@@ -1014,5 +1111,131 @@ fun WeatherDetailItem(icon: ImageVector, label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventDialog(
+    event: CalendarEvent?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, Boolean) -> Unit
+) {
+    var title by remember { mutableStateOf(event?.title ?: "") }
+    var time by remember { mutableStateOf(event?.time ?: "12:00 PM") }
+    var description by remember { mutableStateOf(event?.description ?: "") }
+    var isNotificationEnabled by remember { mutableStateOf(event?.isNotificationEnabled ?: true) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (event == null) stringResource(R.string.add_event) else stringResource(R.string.edit_event)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(stringResource(R.string.event_title)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = time,
+                    onValueChange = { },
+                    label = { Text(stringResource(R.string.event_time)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showTimePicker = true },
+                    enabled = false,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.enable_notification))
+                    Switch(
+                        checked = isNotificationEnabled,
+                        onCheckedChange = { isNotificationEnabled = it }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text(stringResource(R.string.event_description)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (title.isNotEmpty()) onSave(title, time, description, isNotificationEnabled) },
+                enabled = title.isNotEmpty()
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+
+    if (showTimePicker) {
+        val initialHour = try { 
+            val t = time.split(" ")[0].split(":")
+            var h = t[0].toInt()
+            if (time.contains("PM") && h < 12) h += 12
+            if (time.contains("AM") && h == 12) h = 0
+            h
+        } catch (e: Exception) { 12 }
+        
+        val initialMinute = try { 
+            time.split(" ")[0].split(":")[1].toInt()
+        } catch (e: Exception) { 0 }
+        
+        val timePickerState = rememberTimePickerState(
+            initialHour = initialHour,
+            initialMinute = initialMinute
+        )
+
+        Dialog(onDismissRequest = { showTimePicker = false }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    TimePicker(state = timePickerState)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showTimePicker = false }) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                        TextButton(onClick = {
+                            val selectedLocalTime = LocalTime.of(timePickerState.hour, timePickerState.minute)
+                            time = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH).format(selectedLocalTime)
+                            showTimePicker = false
+                        }) {
+                            Text(stringResource(R.string.confirm))
+                        }
+                    }
+                }
+            }
+        }
     }
 }

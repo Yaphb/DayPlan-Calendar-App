@@ -15,6 +15,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app1.pkg.model.CalendarEvent
 import app1.pkg.model.CalendarSettings
+import app1.pkg.model.EventData
 import app1.pkg.model.WeatherInfo
 import app1.pkg.network.WeatherService
 import app1.pkg.network.getWeatherIcon
@@ -65,10 +66,10 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             .create(WeatherService::class.java)
     }
 
-    val selectedDayEvents = derivedStateOf {
-        val currentSelectedDate = _selectedDate.value
-        _events.value.filter { it.date == currentSelectedDate }
+    private val _weatherInfo = derivedStateOf {
+        _weatherData.value[_selectedDate.value]
     }
+    val weatherInfo: State<WeatherInfo?> = _weatherInfo
 
     val datesWithEvents = derivedStateOf {
         _events.value.map { it.date }.toSet()
@@ -81,13 +82,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun onDateSelected(date: LocalDate) {
+    fun selectDate(date: LocalDate) {
         if (_selectedDate.value != date) {
             _selectedDate.value = date
+            fetchWeatherForDate(date)
         }
     }
 
-    fun addEvent(title: String, date: LocalDate, color: Color, time: String, description: String) {
+    fun addEvent(title: String, date: LocalDate, time: String, description: String, color: Color = Color(0xFFE91E63), isNotificationEnabled: Boolean = true) {
         val newEvent = CalendarEvent(
             id = UUID.randomUUID().toString(),
             title = title,
@@ -95,11 +97,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             memberId = null,
             color = color,
             time = time,
-            description = description
+            description = description,
+            isNotificationEnabled = isNotificationEnabled
         )
         _events.value = _events.value + newEvent
         saveEvents()
-        alarmScheduler.schedule(newEvent)
+        if (newEvent.isNotificationEnabled) {
+            alarmScheduler.schedule(newEvent)
+        }
         fetchWeatherForDate(date)
         updateWidget()
     }
@@ -108,7 +113,9 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         _events.value = _events.value.map {
             if (it.id == updatedEvent.id) {
                 alarmScheduler.cancel(it)
-                alarmScheduler.schedule(updatedEvent)
+                if (updatedEvent.isNotificationEnabled) {
+                    alarmScheduler.schedule(updatedEvent)
+                }
                 updatedEvent
             } else it
         }
@@ -117,10 +124,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         updateWidget()
     }
 
-    fun deleteEvent(eventId: String) {
-        val eventToRemove = _events.value.find { it.id == eventId }
-        eventToRemove?.let { alarmScheduler.cancel(it) }
-        _events.value = _events.value.filter { it.id != eventId }
+    fun toggleNotification(event: CalendarEvent) {
+        val updatedEvent = event.copy(isNotificationEnabled = !event.isNotificationEnabled)
+        updateEvent(updatedEvent)
+    }
+
+    fun deleteEvent(event: CalendarEvent) {
+        alarmScheduler.cancel(event)
+        _events.value = _events.value.filter { it.id != event.id }
         saveEvents()
         updateWidget()
     }
@@ -220,7 +231,8 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                 event.date.toString(),
                 event.color.toArgb(),
                 event.description,
-                event.time
+                event.time,
+                event.isNotificationEnabled
             )
         }
         val json = gson.toJson(eventDataList)
@@ -240,7 +252,8 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                     null,
                     Color(data.colorArgb),
                     data.description,
-                    data.time
+                    data.time,
+                    data.isNotificationEnabled
                 )
             }
         } catch (e: Exception) {
@@ -268,21 +281,15 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun updateWidget() {
-        val intent = Intent(getApplication<Application>(), CalendarWidgetProvider::class.java).apply {
+        val context = getApplication<Application>()
+        val intent = Intent(context, CalendarWidgetProvider::class.java).apply {
             action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
         }
-        val ids = AppWidgetManager.getInstance(getApplication())
-            .getAppWidgetIds(ComponentName(getApplication(), CalendarWidgetProvider::class.java))
-        intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-        getApplication<Application>().sendBroadcast(intent)
+        val ids = AppWidgetManager.getInstance(context)
+            .getAppWidgetIds(ComponentName(context, CalendarWidgetProvider::class.java))
+        if (ids.isNotEmpty()) {
+            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            context.sendBroadcast(intent)
+        }
     }
-
-    private data class EventData(
-        val id: String,
-        val title: String,
-        val date: String,
-        val colorArgb: Int,
-        val description: String,
-        val time: String
-    )
 }

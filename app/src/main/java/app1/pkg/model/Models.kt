@@ -16,7 +16,18 @@ data class CalendarEvent(
     val memberId: String? = null,
     val color: Color,
     val description: String = "",
-    val time: String = "All Day"
+    val time: String = "All Day",
+    val isNotificationEnabled: Boolean = true
+)
+
+data class EventData(
+    val id: String,
+    val title: String,
+    val date: String,
+    val colorArgb: Int,
+    val description: String,
+    val time: String,
+    val isNotificationEnabled: Boolean = true
 )
 
 enum class AppTheme(val displayName: String, val primaryColor: Color) {
@@ -28,8 +39,8 @@ enum class AppTheme(val displayName: String, val primaryColor: Color) {
 }
 
 data class CalendarSettings(
-    val wallpaperUri: String? = "https://images.alphacoders.com/138/thumb-1920-1380138.jpg", // Solid dark gradient
-    val bannerUri: String? = "https://images.alphacoders.com/138/thumb-1920-1380138.jpg", // Solid purple gradient
+    val wallpaperUri: String? = null,
+    val bannerUri: String? = null,
     val theme: AppTheme = AppTheme.BLACK,
     val isDarkMode: Boolean = false,
     val fontFamily: String = "Serif",
