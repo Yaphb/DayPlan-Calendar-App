@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
+import java.io.FileOutputStream
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -142,7 +145,33 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         updateWidget()
     }
 
+    fun saveWallpaper(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val file = File(context.filesDir, "wallpaper.jpg")
+                    val outputStream = FileOutputStream(file)
+                    inputStream.use { input ->
+                        outputStream.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    val internalUri = Uri.fromFile(file).toString()
+                    updateSettings(_settings.value.copy(wallpaperUri = internalUri))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun resetSettings() {
+        val context = getApplication<Application>()
+        val file = File(context.filesDir, "wallpaper.jpg")
+        if (file.exists()) file.delete()
+
         _settings.value = CalendarSettings()
         saveSettings()
         updateWidget()

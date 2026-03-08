@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">DayPlan</string>
     <string name="today_plan">今日计划</string>
+    <string name="today">今天</string>
     <string name="search_placeholder">搜索...</string>
     <string name="no_tasks">暂无任务。</string>
     <string name="no_matches">未找到匹配项。</string>
@@ -8,9 +9,11 @@
     <string name="prev_page">上一页</string>
     <string name="next_page">下一页</string>
     <string name="add_event">添加事件</string>
+    <string name="add_new_event">添加新事件</string>
     <string name="edit_event">编辑事件</string>
     <string name="new_plan">新建计划</string>
     <string name="view_plan">查看计划</string>
+    <string name="my_plans">我的计划</string>
     <string name="edit_plan">编辑计划</string>
     <string name="delete">删除</string>
     <string name="cannot_add_past">无法为过去的日期添加计划。</string>
@@ -73,4 +76,7 @@
     <string name="weather_thunderstorm">雷暴</string>
     <string name="weather_thunderstorm_hail">伴有冰雹的雷暴</string>
     <string name="weather_unknown">未知</string>
+    <string name="view_month">月</string>
+    <string name="view_week">周</string>
+    <string name="view_day">日</string>
 </resources>

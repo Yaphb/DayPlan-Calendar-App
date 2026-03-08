@@ -182,7 +182,7 @@ fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
                                     viewModel.selectDate(today)
                                     currentMonth = YearMonth.from(today)
                                 }) {
-                                    Text("Today", color = onBgColor, fontWeight = FontWeight.SemiBold)
+                                    Text(stringResource(R.string.today), color = onBgColor, fontWeight = FontWeight.SemiBold)
                                 }
                             }
 
@@ -272,6 +272,7 @@ fun CalendarScreen(viewModel: CalendarViewModel = viewModel()) {
             settings = settings,
             onDismiss = { showSettingsDialog = false },
             onUpdateSettings = { viewModel.updateSettings(it) },
+            onSaveWallpaper = { viewModel.saveWallpaper(it) },
             onResetSettings = { viewModel.resetSettings() }
         )
     }
@@ -343,6 +344,11 @@ fun ViewModeSwitcher(
         ) {
             listOf(CalendarViewMode.MONTH, CalendarViewMode.WEEK, CalendarViewMode.DAY).forEach { mode ->
                 val isSelected = currentMode == mode
+                val label = when(mode) {
+                    CalendarViewMode.MONTH -> stringResource(R.string.view_month)
+                    CalendarViewMode.WEEK -> stringResource(R.string.view_week)
+                    CalendarViewMode.DAY -> stringResource(R.string.view_day)
+                }
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = if (isSelected) onBgColor else Color.Transparent,
@@ -352,7 +358,7 @@ fun ViewModeSwitcher(
                         .clickable { onModeChange(mode) }
                 ) {
                     Text(
-                        text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
+                        text = label,
                         modifier = Modifier.padding(vertical = 10.dp),
                         style = MaterialTheme.typography.labelLarge,
                         color = if (isSelected) {
@@ -396,12 +402,12 @@ fun SidebarContent(
             
             Spacer(modifier = Modifier.height(32.dp))
             
-            SidebarItem(icon = Icons.Default.CalendarToday, label = "My Plans", isSelected = true, onClick = onClose)
-            SidebarItem(icon = Icons.Default.Add, label = "Add New Event", onClick = onAddEvent)
+            SidebarItem(icon = Icons.Default.CalendarToday, label = stringResource(R.string.my_plans), isSelected = true, onClick = onClose)
+            SidebarItem(icon = Icons.Default.Add, label = stringResource(R.string.add_new_event), onClick = onAddEvent)
             
             Spacer(modifier = Modifier.weight(1f))
             
-            SidebarItem(icon = Icons.Default.Settings, label = "Settings", onClick = onOpenSettings)
+            SidebarItem(icon = Icons.Default.Settings, label = stringResource(R.string.settings), onClick = onOpenSettings)
         }
     }
 }
@@ -869,13 +875,14 @@ fun SettingsDialog(
     settings: CalendarSettings,
     onDismiss: () -> Unit,
     onUpdateSettings: (CalendarSettings) -> Unit,
+    onSaveWallpaper: (Uri) -> Unit,
     onResetSettings: () -> Unit
 ) {
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            onUpdateSettings(settings.copy(wallpaperUri = uri.toString()))
+            onSaveWallpaper(uri)
         }
     }
 

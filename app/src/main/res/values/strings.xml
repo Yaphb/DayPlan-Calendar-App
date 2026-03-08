@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">DayPlan</string>
     <string name="today_plan">Today\'s Plan</string>
+    <string name="today">Today</string>
     <string name="search_placeholder">Search...</string>
     <string name="no_tasks">No tasks recorded.</string>
     <string name="no_matches">No matches found.</string>
@@ -8,9 +9,11 @@
     <string name="prev_page">Prev Page</string>
     <string name="next_page">Next Page</string>
     <string name="add_event">Add Event</string>
+    <string name="add_new_event">Add New Event</string>
     <string name="edit_event">Edit Event</string>
     <string name="new_plan">New Plan</string>
     <string name="view_plan">View Plan</string>
+    <string name="my_plans">My Plans</string>
     <string name="edit_plan">Edit Plan</string>
     <string name="delete">Delete</string>
     <string name="cannot_add_past">Cannot add plans for past dates.</string>
@@ -73,4 +76,7 @@
     <string name="weather_thunderstorm">Thunderstorm</string>
     <string name="weather_thunderstorm_hail">Thunderstorm with hail</string>
     <string name="weather_unknown">Unknown</string>
+    <string name="view_month">Month</string>
+    <string name="view_week">Week</string>
+    <string name="view_day">Day</string>
 </resources>
